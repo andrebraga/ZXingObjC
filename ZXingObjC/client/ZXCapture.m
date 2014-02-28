@@ -150,22 +150,18 @@
 }
 
 - (void)stop {
-  // NSLog(@"stop");
-
   if (!self.running) {
     return;
   }
 
   if (self.session.running) {
-    // NSLog(@"stop running");
     [self.layer removeFromSuperlayer];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
       [self.session stopRunning];
     });
-  } else {
-    // NSLog(@"already stopped");
   }
+
   self.running = NO;
 }
 
@@ -185,27 +181,20 @@
 }
 
 - (void)start {
-  // NSLog(@"start %@ %d %@ %@", self.session, running, output, delegate);
-
   if (self.hardStop) {
     return;
   }
 
   if (self.delegate || self.luminanceLayer || self.binaryLayer) {
-    // for side effects
     [self output];
   }
     
-  if (self.session.running) {
-    // NSLog(@"already running");
-  } else {
-
+  if (!self.session.running) {
     static int i = 0;
     if (++i == -2) {
       abort();
     }
 
-    // NSLog(@"start running");
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
       [self.session startRunning];
     });
@@ -214,7 +203,6 @@
 }
 
 - (void)start_stop {
-  // NSLog(@"ss %d %@ %d %@ %@ %@", running, delegate, on_screen, output, luminanceLayer, binary);
   if ((!self.running && (self.delegate || self.onScreen)) ||
       (!self.output &&
        (self.delegate ||
@@ -284,52 +272,34 @@
 - (void)runActionForKey:(NSString *)key
                  object:(id)anObject
               arguments:(NSDictionary *)dict {
-  // NSLog(@" rAFK %@ %@ %@", key, anObject, dict); 
   (void)anObject;
   (void)dict;
   if ([key isEqualToString:kCAOnOrderIn]) {
     
     if (self.orderInSkip) {
       self.orderInSkip--;
-      // NSLog(@"order in skip");
       return;
     }
 
-    // NSLog(@"order in");
-
     self.onScreen = YES;
-    if (self.luminanceLayer && self.luminanceLayer.superlayer != self.layer) {
-      // [layer addSublayer:luminance];
-    }
-    if (self.binaryLayer && self.binaryLayer.superlayer != self.layer) {
-      // [layer addSublayer:binary];
-    }
     [self start_stop];
   } else if ([key isEqualToString:kCAOnOrderOut]) {
     if (self.orderOutSkip) {
       self.orderOutSkip--;
-      // NSLog(@"order out skip");
       return;
     }
 
     self.onScreen = NO;
-    // NSLog(@"order out");
     [self start_stop];
   }
 }
 
 - (id<CAAction>)actionForLayer:(CALayer *)_layer forKey:(NSString *)event {
-  // NSLog(@"layer event %@", event);
-
-  // never animate
   [CATransaction setValue:[NSNumber numberWithFloat:0.0f]
                    forKey:kCATransactionAnimationDuration];
 
-  // NSLog(@"afl %@ %@", _layer, event);
   if ([event isEqualToString:kCAOnOrderIn]
       || [event isEqualToString:kCAOnOrderOut]
-      // || ([event isEqualToString:@"bounds"] && (binary || luminance))
-      // || ([event isEqualToString:@"onLayout"] && (binary || luminance))
     ) {
     return self;
   } else if ([event isEqualToString:@"contents"] ) {
@@ -361,24 +331,14 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     }
              
     if (!self.captureToFilename && !self.luminanceLayer && !self.binaryLayer && !self.delegate) {
-      // NSLog(@"skipping capture");
       return;
     }
 
-    // NSLog(@"received frame");
-
     CVImageBufferRef videoFrame = CMSampleBufferGetImageBuffer(sampleBuffer);
-
-    // NSLog(@"%ld %ld", CVPixelBufferGetWidth(videoFrame), CVPixelBufferGetHeight(videoFrame));
-    // NSLog(@"delegate %@", delegate);
 
     (void)sampleBuffer;
     (void)captureOutput;
     (void)connection;
-
-    // The routines don't exist in iOS. There are alternatives, but a good
-    // solution would have to figure out a reasonable path and might be
-    // better as a post to url
 
     if (self.captureToFilename) {
       CGImageRef image = 
