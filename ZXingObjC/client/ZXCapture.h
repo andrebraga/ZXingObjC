@@ -22,32 +22,35 @@
 
 @interface ZXCapture : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate, CAAction>
 
-@property (nonatomic, weak) id<ZXCaptureDelegate> delegate;
+@property (nonatomic, assign) int camera;
+@property (nonatomic, strong) AVCaptureDevice *captureDevice;
 @property (nonatomic, copy) NSString *captureToFilename;
-@property (nonatomic) CGAffineTransform transform;
-@property (nonatomic, readonly) AVCaptureVideoDataOutput *output;
-@property (nonatomic, readonly) CALayer *layer;
-@property (nonatomic, retain) AVCaptureDevice *captureDevice;
+@property (nonatomic, weak) id<ZXCaptureDelegate> delegate;
+@property (nonatomic, assign, readonly) BOOL hasBack;
+@property (nonatomic, assign, readonly) BOOL hasFront;
+@property (nonatomic, assign, readonly) BOOL hasTorch;
+@property (nonatomic, strong) ZXDecodeHints *hints;
+@property (nonatomic, strong, readonly) CALayer *layer;
 @property (nonatomic, assign) BOOL mirror;
-@property (nonatomic, readonly) BOOL running;
-@property (nonatomic, retain) id<ZXReader> reader;
-@property (nonatomic, retain) ZXDecodeHints *hints;
+@property (nonatomic, strong, readonly) AVCaptureVideoDataOutput *output;
+@property (nonatomic, strong) id<ZXReader> reader;
 @property (nonatomic, assign) CGFloat rotation;
-@property (nonatomic, readonly) BOOL hasFront;
-@property (nonatomic, readonly) BOOL hasBack;
-@property (nonatomic, readonly) BOOL hasTorch;
-@property (nonatomic, readonly) int front;
-@property (nonatomic, readonly) int back;
-@property (nonatomic) int camera;
-@property (nonatomic) BOOL torch;
+@property (nonatomic, assign, readonly) BOOL running;
+@property (nonatomic, assign) BOOL torch;
+@property (nonatomic, assign) CGAffineTransform transform;
+
+- (int)back;
+- (int)front;
+
+- (CALayer *)binary;
+- (void)setBinary:(BOOL)on_off;
 
 - (CALayer *)luminance;
 - (void)setLuminance:(BOOL)on_off;
-- (CALayer *)binary;
-- (void)setBinary:(BOOL)on_off;
-- (void)start;
-- (void)stop;
+
 - (void)hard_stop;
 - (void)order_skip;
+- (void)start;
+- (void)stop;
 
 @end

@@ -14,79 +14,58 @@
  * limitations under the License.
  */
 
+#import "ZXBinaryBitmap.h"
 #import "ZXCapture.h"
 #import "ZXCaptureDelegate.h"
 #import "ZXCGImageLuminanceSource.h"
-#import "ZXBinaryBitmap.h"
 #import "ZXDecodeHints.h"
 #import "ZXHybridBinarizer.h"
 #import "ZXMultiFormatReader.h"
 #import "ZXReader.h"
 #import "ZXResult.h"
 
-#if TARGET_OS_EMBEDDED || TARGET_IPHONE_SIMULATOR
-#import <UIKit/UIKit.h>
-#endif
+@interface ZXCapture ()
 
-@interface ZXCapture () {
-  int order_in_skip;
-  int order_out_skip;
-  BOOL running;
-  BOOL on_screen;
-  CALayer *luminance;
-  CALayer *binary;
-  size_t width;
-  size_t height;
-  size_t reported_width;
-  size_t reported_height;
-  BOOL hard_stop;
-  int camera;
-  BOOL torch;
-  BOOL mirror;
-  int capture_device_index;
-  BOOL cameraIsReady;
-}
-
+@property (nonatomic, strong) CALayer *binaryLayer;
+@property (nonatomic, assign) BOOL cameraIsReady;
+@property (nonatomic, assign) int captureDeviceIndex;
 @property (nonatomic, strong) __attribute__((NSObject)) dispatch_queue_t captureQueue;
+@property (nonatomic, assign) BOOL hardStop;
 @property (nonatomic, strong) AVCaptureDeviceInput *input;
-@property (nonatomic, assign) AVCaptureVideoPreviewLayer *layer;
-@property (nonatomic, strong) AVCaptureSession *session;
+@property (nonatomic, strong) AVCaptureVideoPreviewLayer *layer;
+@property (nonatomic, strong) CALayer *luminanceLayer;
+@property (nonatomic, assign) int orderInSkip;
+@property (nonatomic, assign) int orderOutSkip;
+@property (nonatomic, assign) BOOL onScreen;
 @property (nonatomic, strong) AVCaptureVideoDataOutput *output;
+@property (nonatomic, assign) BOOL running;
+@property (nonatomic, strong) AVCaptureSession *session;
 
 @end
 
 @implementation ZXCapture
 
 - (ZXCapture *)init {
-  if ((self = [super init])) {
-    on_screen = running = NO;
-    reported_width = 0;
-    reported_height = 0;
-    width = 1920;
-    height = 1080;
-    hard_stop = false;
-    capture_device_index = -1;
-    order_in_skip = 0;
-    order_out_skip = 0;
-    _transform = CGAffineTransformIdentity;
-    _rotation = 0.0f;
-    _reader = [ZXMultiFormatReader reader];
-    _hints = [ZXDecodeHints hints];
+  if (self = [super init]) {
+    _captureDeviceIndex = -1;
     _captureQueue = dispatch_queue_create("com.zxing.captureQueue", NULL);
+    _hardStop = NO;
+    _hints = [ZXDecodeHints hints];
+    _onScreen = NO;
+    _orderInSkip = 0;
+    _orderOutSkip = 0;
+    _reader = [ZXMultiFormatReader reader];
+    _rotation = 0.0f;
+    _running = NO;
+    _transform = CGAffineTransformIdentity;
   }
+
   return self;
 }
 
-
-- (BOOL)running {return running;}
-
-- (BOOL)mirror {
-  return mirror;
-}
-
-- (void)setMirror:(BOOL)mirror_ {
-  if (mirror != mirror_) {
-    mirror = mirror_;
+- (void)setMirror:(BOOL)mirror {
+  if (_mirror != mirror) {
+    _mirror = mirror;
     if (self.layer) {
       _transform.a = -_transform.a;
       [self.layer setAffineTransform:_transform];
@@ -95,7 +74,8 @@
 }
 
 - (void)order_skip {
-  order_out_skip = order_in_skip = 1;
+  self.orderInSkip = 1;
+  self.orderOutSkip = 1;
 }
 
 - (AVCaptureDevice *)device {
@@ -109,24 +89,24 @@
   [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
 
   if ([devices count] > 0) {
-    if (capture_device_index == -1) {
+    if (self.captureDeviceIndex == -1) {
       AVCaptureDevicePosition position = AVCaptureDevicePositionBack;
-      if (camera == self.front) {
+      if (self.camera == self.front) {
         position = AVCaptureDevicePositionFront;
       }
 
       for(unsigned int i=0; i < [devices count]; ++i) {
         AVCaptureDevice *dev = [devices objectAtIndex:i];
         if (dev.position == position) {
-          capture_device_index = i;
+          self.captureDeviceIndex = i;
           zxd = dev;
           break;
         }
       }
     }
     
-    if (!zxd && capture_device_index != -1) {
-      zxd = [devices objectAtIndex:capture_device_index];
+    if (!zxd && self.captureDeviceIndex != -1) {
+      zxd = [devices objectAtIndex:self.captureDeviceIndex];
     }
   }
 
@@ -172,7 +152,7 @@
 - (void)stop {
   // NSLog(@"stop");
 
-  if (!running) {
+  if (!self.running) {
     return;
   }
 
@@ -186,7 +166,7 @@
   } else {
     // NSLog(@"already stopped");
   }
-  running = false;
+  self.running = NO;
 }
 
 - (AVCaptureVideoDataOutput *)output {
@@ -207,11 +187,11 @@
 - (void)start {
   // NSLog(@"start %@ %d %@ %@", self.session, running, output, delegate);
 
-  if (hard_stop) {
+  if (self.hardStop) {
     return;
   }
 
-  if (self.delegate || luminance || binary) {
+  if (self.delegate || self.luminanceLayer || self.binaryLayer) {
     // for side effects
     [self output];
   }
@@ -230,18 +210,18 @@
       [self.session startRunning];
     });
   }
-  running = true;
+  self.running = YES;
 }
 
 - (void)start_stop {
   // NSLog(@"ss %d %@ %d %@ %@ %@", running, delegate, on_screen, output, luminanceLayer, binary);
-  if ((!running && (self.delegate || on_screen)) ||
+  if ((!self.running && (self.delegate || self.onScreen)) ||
       (!self.output &&
        (self.delegate ||
-        (on_screen && (luminance || binary))))) {
+        (self.onScreen && (self.luminanceLayer || self.binaryLayer))))) {
     [self start];
   }
-  if (running && !self.delegate && !on_screen) {
+  if (self.running && !self.delegate && !self.onScreen) {
     [self stop];
   }
 }
@@ -249,40 +229,40 @@
 - (void)setDelegate:(id<ZXCaptureDelegate>)delegate {
   _delegate = delegate;
   if (delegate) {
-    hard_stop = false;
+    self.hardStop = NO;
   }
   [self start_stop];
 }
 
 - (void)hard_stop {
-  hard_stop = true;
-  if (running) {
+  self.hardStop = YES;
+  if (self.running) {
     [self stop];
   }
 }
 
-- (void)setLuminance:(BOOL)on {
-  if (on && !luminance) {
-    luminance = [CALayer layer];
-  } else if (!on && luminance) {
-    luminance = nil;
-  }
-}
-
 - (CALayer *)luminance {
-  return luminance;
+  return self.luminanceLayer;
 }
 
-- (void)setBinary:(BOOL)on {
-  if (on && !binary) {
-    binary = [CALayer layer];
-  } else if (!on && binary) {
-    binary = nil;
+- (void)setLuminance:(BOOL)on {
+  if (on && !self.luminanceLayer) {
+    self.luminanceLayer = [CALayer layer];
+  } else if (!on && self.luminanceLayer) {
+    self.luminanceLayer = nil;
   }
 }
 
 - (CALayer *)binary {
-  return binary;
+  return self.binaryLayer;
+}
+
+- (void)setBinary:(BOOL)on {
+  if (on && !self.binaryLayer) {
+    self.binaryLayer = [CALayer layer];
+  } else if (!on && self.binaryLayer) {
+    self.binaryLayer = nil;
+  }
 }
 
 - (CALayer *)layer {
@@ -309,30 +289,30 @@
   (void)dict;
   if ([key isEqualToString:kCAOnOrderIn]) {
     
-    if (order_in_skip) {
-      --order_in_skip;
+    if (self.orderInSkip) {
+      self.orderInSkip--;
       // NSLog(@"order in skip");
       return;
     }
 
     // NSLog(@"order in");
 
-    on_screen = true;
-    if (luminance && luminance.superlayer != self.layer) {
+    self.onScreen = YES;
+    if (self.luminanceLayer && self.luminanceLayer.superlayer != self.layer) {
       // [layer addSublayer:luminance];
     }
-    if (binary && binary.superlayer != self.layer) {
+    if (self.binaryLayer && self.binaryLayer.superlayer != self.layer) {
       // [layer addSublayer:binary];
     }
     [self start_stop];
   } else if ([key isEqualToString:kCAOnOrderOut]) {
-    if (order_out_skip) {
-      --order_out_skip;
+    if (self.orderOutSkip) {
+      self.orderOutSkip--;
       // NSLog(@"order out skip");
       return;
     }
 
-    on_screen = false;
+    self.onScreen = NO;
     // NSLog(@"order out");
     [self start_stop];
   }
@@ -369,9 +349,9 @@
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection *)connection {
   @autoreleasepool {
-    if (!cameraIsReady)
+    if (!self.cameraIsReady)
     {
-      cameraIsReady = YES;
+      self.cameraIsReady = YES;
       if ([self.delegate respondsToSelector:@selector(captureCameraIsReady:)])
       {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -380,7 +360,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
       }
     }
              
-    if (!self.captureToFilename && !luminance && !binary && !self.delegate) {
+    if (!self.captureToFilename && !self.luminanceLayer && !self.binaryLayer && !self.delegate) {
       // NSLog(@"skipping capture");
       return;
     }
@@ -420,22 +400,22 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     ZXCGImageLuminanceSource *source = [[ZXCGImageLuminanceSource alloc] initWithCGImage:rotatedImage];
     CGImageRelease(rotatedImage);
 
-    if (luminance) {
+    if (self.luminanceLayer) {
       CGImageRef image = source.image;
       CGImageRetain(image);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0), dispatch_get_main_queue(), ^{
-          luminance.contents = (__bridge id)image;
+          self.luminanceLayer.contents = (__bridge id)image;
           CGImageRelease(image);
         });
     }
 
-    if (binary || self.delegate) {
+    if (self.binaryLayer || self.delegate) {
       ZXHybridBinarizer *binarizer = [[ZXHybridBinarizer alloc] initWithSource:source];
 
-      if (binary) {
+      if (self.binaryLayer) {
         CGImageRef image = [binarizer createImage];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0), dispatch_get_main_queue(), ^{
-          binary.contents = (__bridge id)image;
+          self.binaryLayer.contents = (__bridge id)image;
           CGImageRelease(image);
         });
       }
@@ -485,25 +465,17 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
   return 1;
 }
 
-- (int)camera {
-  return camera;
-}
-
-- (BOOL)torch {
-  return torch;
-}
-
-- (void)setCamera:(int)camera_ {
-  if (camera  != camera_) {
-    camera = camera_;
-    capture_device_index = -1;
+- (void)setCamera:(int)camera {
+  if (_camera != camera) {
+    _camera = camera;
+    self.captureDeviceIndex = -1;
     self.captureDevice = nil;
     [self replaceInput];
   }
 }
 
-- (void)setTorch:(BOOL)torch_ {
-  torch = torch_;
+- (void)setTorch:(BOOL)torch {
+  _torch = torch;
   [self.input.device lockForConfiguration:nil];
   if (self.torch) {
     self.input.device.torchMode = AVCaptureTorchModeOn;
