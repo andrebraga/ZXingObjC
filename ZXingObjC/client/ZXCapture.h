@@ -26,9 +26,6 @@
 @property (nonatomic, strong) AVCaptureDevice *captureDevice;
 @property (nonatomic, copy) NSString *captureToFilename;
 @property (nonatomic, weak) id<ZXCaptureDelegate> delegate;
-@property (nonatomic, assign, readonly) BOOL hasBack;
-@property (nonatomic, assign, readonly) BOOL hasFront;
-@property (nonatomic, assign, readonly) BOOL hasTorch;
 @property (nonatomic, strong) ZXDecodeHints *hints;
 @property (nonatomic, strong, readonly) CALayer *layer;
 @property (nonatomic, assign) BOOL mirror;
@@ -41,6 +38,9 @@
 
 - (int)back;
 - (int)front;
+- (BOOL)hasBack;
+- (BOOL)hasFront;
+- (BOOL)hasTorch;
 
 - (CALayer *)binary;
 - (void)setBinary:(BOOL)on_off;
