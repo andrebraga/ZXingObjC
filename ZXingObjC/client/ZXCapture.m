@@ -15,6 +15,7 @@
  */
 
 #import "ZXCapture.h"
+#import "ZXCaptureDelegate.h"
 #import "ZXCGImageLuminanceSource.h"
 #import "ZXBinaryBitmap.h"
 #import "ZXDecodeHints.h"
@@ -27,63 +28,34 @@
 #import <UIKit/UIKit.h>
 #endif
 
-@interface ZXCapture ()
+@interface ZXCapture () {
+  int order_in_skip;
+  int order_out_skip;
+  BOOL running;
+  BOOL on_screen;
+  CALayer *luminance;
+  CALayer *binary;
+  size_t width;
+  size_t height;
+  size_t reported_width;
+  size_t reported_height;
+  BOOL hard_stop;
+  int camera;
+  BOOL torch;
+  BOOL mirror;
+  int capture_device_index;
+  BOOL cameraIsReady;
+}
 
-@property (nonatomic, assign) AVCaptureVideoPreviewLayer *layer;
 @property (nonatomic, strong) __attribute__((NSObject)) dispatch_queue_t captureQueue;
+@property (nonatomic, strong) AVCaptureDeviceInput *input;
+@property (nonatomic, assign) AVCaptureVideoPreviewLayer *layer;
+@property (nonatomic, strong) AVCaptureSession *session;
+@property (nonatomic, strong) AVCaptureVideoDataOutput *output;
 
 @end
 
 @implementation ZXCapture
-
-// Adapted from http://blog.coriolis.ch/2009/09/04/arbitrary-rotation-of-a-cgimage/ and https://github.com/JanX2/CreateRotateWriteCGImage
-- (CGImageRef)createRotatedImage:(CGImageRef)original degrees:(float)degrees CF_RETURNS_RETAINED {
-  if (degrees == 0.0f) {
-    CGImageRetain(original);
-    return original;
-  } else {
-    double radians = degrees * M_PI / 180;
-
-#if TARGET_OS_EMBEDDED || TARGET_IPHONE_SIMULATOR
-    radians = -1 * radians;
-#endif
-
-    size_t _width = CGImageGetWidth(original);
-    size_t _height = CGImageGetHeight(original);
-
-    CGRect imgRect = CGRectMake(0, 0, _width, _height);
-    CGAffineTransform __transform = CGAffineTransformMakeRotation(radians);
-    CGRect rotatedRect = CGRectApplyAffineTransform(imgRect, __transform);
-
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGContextRef context = CGBitmapContextCreate(NULL,
-                                                 rotatedRect.size.width,
-                                                 rotatedRect.size.height,
-                                                 CGImageGetBitsPerComponent(original),
-                                                 0,
-                                                 colorSpace,
-                                                 kCGBitmapAlphaInfoMask & kCGImageAlphaPremultipliedFirst);
-    CGContextSetAllowsAntialiasing(context, FALSE);
-    CGContextSetInterpolationQuality(context, kCGInterpolationNone);
-    CGColorSpaceRelease(colorSpace);
-
-    CGContextTranslateCTM(context,
-                          +(rotatedRect.size.width/2),
-                          +(rotatedRect.size.height/2));
-    CGContextRotateCTM(context, radians);
-
-    CGContextDrawImage(context, CGRectMake(-imgRect.size.width/2,
-                                           -imgRect.size.height/2,
-                                           imgRect.size.width,
-                                           imgRect.size.height),
-                       original);
-
-    CGImageRef rotatedImage = CGBitmapContextCreateImage(context);
-    CFRelease(context);
-
-    return rotatedImage;
-  }
-}
 
 - (ZXCapture *)init {
   if ((self = [super init])) {
@@ -104,6 +76,7 @@
   }
   return self;
 }
+
 
 - (BOOL)running {return running;}
 
@@ -167,33 +140,33 @@
 }
 
 - (void)replaceInput {
-  [session beginConfiguration];
+  [self.session beginConfiguration];
 
-  if (session && input) {
-    [session removeInput:input];
-    input = nil;
+  if (self.session && self.input) {
+    [self.session removeInput:self.input];
+    self.input = nil;
   }
 
   AVCaptureDevice *zxd = [self device];
 
   if (zxd) {
-    input = [AVCaptureDeviceInput deviceInputWithDevice:zxd error:nil];
+    self.input = [AVCaptureDeviceInput deviceInputWithDevice:zxd error:nil];
   }
   
-  if (input) {
-    session.sessionPreset = AVCaptureSessionPresetMedium;
-    [session addInput:input];
+  if (self.input) {
+    self.session.sessionPreset = AVCaptureSessionPresetMedium;
+    [self.session addInput:self.input];
   }
 
-  [session commitConfiguration];
+  [self.session commitConfiguration];
 }
 
 - (AVCaptureSession *)session {
-  if (session == 0) {
-    session = [[AVCaptureSession alloc] init];
+  if (!_session) {
+    _session = [[AVCaptureSession alloc] init];
     [self replaceInput];
   }
-  return session;
+  return _session;
 }
 
 - (void)stop {
@@ -216,24 +189,19 @@
   running = false;
 }
 
-- (void)setOutputAttributes {
-    NSString *key = (NSString *)kCVPixelBufferPixelFormatTypeKey;
-    NSNumber *value = [NSNumber numberWithUnsignedInt:kCVPixelFormatType_32BGRA];
-    NSMutableDictionary *attributes = [NSMutableDictionary dictionaryWithObject:value forKey:key];
-    [self.output setVideoSettings:attributes];
-}
-
 - (AVCaptureVideoDataOutput *)output {
-  if (!output) {
-    output = [[AVCaptureVideoDataOutput alloc] init];
-    [self setOutputAttributes];
-    [output setAlwaysDiscardsLateVideoFrames:YES];
+  if (!_output) {
+    _output = [[AVCaptureVideoDataOutput alloc] init];
+    [_output setVideoSettings:@{
+      (NSString *)kCVPixelBufferPixelFormatTypeKey : [NSNumber numberWithUnsignedInt:kCVPixelFormatType_32BGRA]
+    }];
+    [_output setAlwaysDiscardsLateVideoFrames:YES];
+    [_output setSampleBufferDelegate:self queue:_captureQueue];
 
-    [output setSampleBufferDelegate:self queue:_captureQueue];
-
-    [self.session addOutput:output];
+    [self.session addOutput:_output];
   }
-  return output;
+
+  return _output;
 }
 
 - (void)start {
@@ -268,7 +236,7 @@
 - (void)start_stop {
   // NSLog(@"ss %d %@ %d %@ %@ %@", running, delegate, on_screen, output, luminanceLayer, binary);
   if ((!running && (self.delegate || on_screen)) ||
-      (!output &&
+      (!self.output &&
        (self.delegate ||
         (on_screen && (luminance || binary))))) {
     [self start];
@@ -536,18 +504,67 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
 - (void)setTorch:(BOOL)torch_ {
   torch = torch_;
-      [input.device lockForConfiguration:nil];
-      if (torch) {
-        input.device.torchMode = AVCaptureTorchModeOn;
-      } else {
-        input.device.torchMode = AVCaptureTorchModeOff;
-      }
-      [input.device unlockForConfiguration];
+  [self.input.device lockForConfiguration:nil];
+  if (self.torch) {
+    self.input.device.torchMode = AVCaptureTorchModeOn;
+  } else {
+    self.input.device.torchMode = AVCaptureTorchModeOff;
+  }
+  [self.input.device unlockForConfiguration];
 }
 
 - (void)setTransform:(CGAffineTransform)transform_ {
   self.transform = transform_;
   [self.layer setAffineTransform:transform_];
+}
+
+// Adapted from http://blog.coriolis.ch/2009/09/04/arbitrary-rotation-of-a-cgimage/ and https://github.com/JanX2/CreateRotateWriteCGImage
+- (CGImageRef)createRotatedImage:(CGImageRef)original degrees:(float)degrees CF_RETURNS_RETAINED {
+  if (degrees == 0.0f) {
+    CGImageRetain(original);
+    return original;
+  } else {
+    double radians = degrees * M_PI / 180;
+
+#if TARGET_OS_EMBEDDED || TARGET_IPHONE_SIMULATOR
+    radians = -1 * radians;
+#endif
+
+    size_t _width = CGImageGetWidth(original);
+    size_t _height = CGImageGetHeight(original);
+
+    CGRect imgRect = CGRectMake(0, 0, _width, _height);
+    CGAffineTransform __transform = CGAffineTransformMakeRotation(radians);
+    CGRect rotatedRect = CGRectApplyAffineTransform(imgRect, __transform);
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(NULL,
+                                                 rotatedRect.size.width,
+                                                 rotatedRect.size.height,
+                                                 CGImageGetBitsPerComponent(original),
+                                                 0,
+                                                 colorSpace,
+                                                 kCGBitmapAlphaInfoMask & kCGImageAlphaPremultipliedFirst);
+    CGContextSetAllowsAntialiasing(context, FALSE);
+    CGContextSetInterpolationQuality(context, kCGInterpolationNone);
+    CGColorSpaceRelease(colorSpace);
+
+    CGContextTranslateCTM(context,
+                          +(rotatedRect.size.width/2),
+                          +(rotatedRect.size.height/2));
+    CGContextRotateCTM(context, radians);
+
+    CGContextDrawImage(context, CGRectMake(-imgRect.size.width/2,
+                                           -imgRect.size.height/2,
+                                           imgRect.size.width,
+                                           imgRect.size.height),
+                       original);
+
+    CGImageRef rotatedImage = CGBitmapContextCreateImage(context);
+    CFRelease(context);
+
+    return rotatedImage;
+  }
 }
 
 @end

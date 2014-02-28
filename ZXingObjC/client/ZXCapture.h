@@ -16,33 +16,11 @@
 
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
-#import "ZXCaptureDelegate.h"
 
-@protocol ZXReader;
+@protocol ZXCaptureDelegate, ZXReader;
 @class ZXDecodeHints;
 
-@interface ZXCapture : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate, CAAction> {
-  AVCaptureSession *session;
-  AVCaptureDeviceInput *input;
-  AVCaptureVideoDataOutput *output;
-
-  int order_in_skip;
-  int order_out_skip;
-  BOOL running;
-  BOOL on_screen;
-  CALayer *luminance;
-  CALayer *binary;
-  size_t width;
-  size_t height;
-  size_t reported_width;
-  size_t reported_height;
-  BOOL hard_stop;
-  int camera;
-  BOOL torch;
-  BOOL mirror;
-  int capture_device_index;
-  BOOL cameraIsReady;
-}
+@interface ZXCapture : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate, CAAction>
 
 @property (nonatomic, weak) id<ZXCaptureDelegate> delegate;
 @property (nonatomic, copy) NSString *captureToFilename;
@@ -63,7 +41,6 @@
 @property (nonatomic) int camera;
 @property (nonatomic) BOOL torch;
 
-- (id)init;
 - (CALayer *)luminance;
 - (void)setLuminance:(BOOL)on_off;
 - (CALayer *)binary;
