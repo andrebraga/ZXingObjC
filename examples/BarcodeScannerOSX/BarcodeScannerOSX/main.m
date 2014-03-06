@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 ZXing authors
+ * Copyright 2014 ZXing authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-#import "ZXCaptureView.h"
+#import <Cocoa/Cocoa.h>
 
-@implementation ZXCaptureView
-
-@end
+int main(int argc, char *argv[])
+{
+    return NSApplicationMain(argc, (const char **) argv);
+}
